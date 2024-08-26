@@ -1,2 +1,2 @@
-# AvizoSecure
- My attempt at a part 11 compliant Avizo interface
+# NucleInsight
+My attempt at building a part 11 compliant nuclear segmentation tool
