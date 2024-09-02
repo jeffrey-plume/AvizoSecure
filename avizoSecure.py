@@ -16,11 +16,15 @@ from skimage.io import imread
 from skimage.color import label2rgb
 from skimage.measure import label,regionprops
 from skimage.morphology import remove_small_objects
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization, hashes
 from LoginDialog import LoginDialog
-from registerDialog import registerDialog
+from RegisterDialog import RegisterDialog
 import h5py
-
+from hashlib import sha256 
+import logging
+from UserAuthDialog import userAuthDialog
+# Set up basic configuration for logging
+logging.basicConfig(level=logging.INFO, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -68,12 +72,12 @@ class MainWindow(QMainWindow):
         file_menu.addAction(login_action)
         
         file_menu.addSeparator()
-        self.new_study_action = QAction("New Study", self)
+        self.new_study_action = QAction("New", self)
         self.new_study_action.triggered.connect(self.create_new_study)
         self.new_study_action.setDisabled(True)
         file_menu.addAction(self.new_study_action)
 
-        self.load_study_action = QAction("Open Study", self)
+        self.load_study_action = QAction("Open", self)
         self.load_study_action.triggered.connect(self.select_study_file)
         self.load_study_action.setDisabled(True)
         file_menu.addAction(self.load_study_action)
@@ -85,7 +89,7 @@ class MainWindow(QMainWindow):
         self.save_study_action.setDisabled(True)
         file_menu.addAction(self.save_study_action)
 
-        self.saveas_study_action = QAction("Save as", self)
+        self.saveas_study_action = QAction("Save As", self)
         self.saveas_study_action.triggered.connect(self.show_save_file_dialog)
         self.saveas_study_action.setDisabled(True)
         file_menu.addAction(self.saveas_study_action)
@@ -94,20 +98,20 @@ class MainWindow(QMainWindow):
 
         # Add Load Images action
         self.load_images_action = QAction("Import Images", self)
-        self.load_images_action.triggered.connect(self.select_image_folder)
+        self.load_images_action.triggered.connect(self.select_image_files)
         self.load_images_action.setDisabled(True)
         file_menu.addAction(self.load_images_action)
 
         # Add Sign action
         self.sign_action = QAction("Sign", self)
-        self.sign_action.triggered.connect(self.open_sign_dialog)
+        self.sign_action.triggered.connect(self.open_login_dialog)
         self.sign_action.setDisabled(True)
         file_menu.addAction(self.sign_action)
 
         file_menu.addSeparator()
         
         # Add Sign action
-        register = QAction("User Register", self)
+        register = QAction("New User", self)
         register.triggered.connect(self.register_action)
         file_menu.addAction(register)
 
@@ -158,6 +162,7 @@ class MainWindow(QMainWindow):
         # Add the checkbox group to the side panel layout
         side_layout.addWidget(checkbox_group)
 
+
         self.checkbox_option1.stateChanged.connect(self.update_display)
         self.checkbox_option2.stateChanged.connect(self.update_display)
         
@@ -184,7 +189,7 @@ class MainWindow(QMainWindow):
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM audit_trail")
                 cursor.execute("DELETE FROM  results")
-                self.log_audit_trail(action = 'New Study Created')
+                self.log_audit_trail(action = 'New Study Created', signature = self.signature)
                             
                 self.load_results_table()
                 QMessageBox.information(self, 'Success', f'New study created: {file_path}')
@@ -192,52 +197,55 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, 'Error', f'Failed to create database: {e}')  
             # Initialize an SQLite database in the new file
 
+
+
+
     def connecttosql(self, file_path):
         try:
-            conn = sqlite3.connect(file_path)
-            cursor = conn.cursor()
-            # Create a sample table in the new database (customize as needed)
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS audit_trail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username INTEGER NOT NULL,
-            date TEXT NOT NULL,
-            time TEXT NOT NULL,
-            action TEXT NOT NULL,
-            signature TEXT NOT NULL
-            )
-            ''')
-        
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            image TEXT NOT NULL,
-            area TEXT NOT NULL,
-            perimeter TEXT NOT NULL,
-            x TEXT NOT NULL,
-            y TEXT NOT NULL,
-            eccentricity TEXT NOT NULL,
-            major_axis_length TEXT NOT NULL,
-            minor_axis_length TEXT NOT NULL
-            )
-            ''')
-
-            self.conn = conn
-            self.current_image_index = 0
-            self.segment = 0
-            
-            self.load_images_action.setDisabled(False)
-            self.sign_action.setDisabled(False)
-            self.run_recipe_button.setEnabled(True)
-            self.save_study_action.setDisabled(False)
-            self.saveas_study_action.setDisabled(False)
-
-            self.load_results_table()
-
+            with sqlite3.connect(file_path) as conn:
+                cursor = conn.cursor()
+                # Use context manager to automatically close cursor
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS audit_trail (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username INTEGER NOT NULL,
+                    date TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    signature TEXT NOT NULL
+                )
+                ''')
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    image TEXT NOT NULL,
+                    area TEXT NOT NULL,
+                    perimeter TEXT NOT NULL,
+                    x TEXT NOT NULL,
+                    y TEXT NOT NULL,
+                    eccentricity TEXT NOT NULL,
+                    major_axis_length TEXT NOT NULL,
+                    minor_axis_length TEXT NOT NULL
+                )
+                ''')
+    
+                self.conn = conn
+                self.current_image_index = 0
+                self.segment = 0
+                self.load_images_action.setDisabled(False)
+                self.sign_action.setDisabled(False)
+                self.run_recipe_button.setEnabled(True)
+                self.save_study_action.setDisabled(False)
+                self.saveas_study_action.setDisabled(False)
+                self.load_results_table()
+    
+                logging.info(f"Connected to database: {file_path}")
         except sqlite3.Error as e:
-                QMessageBox.critical(self, 'Error', f'Failed to connect to database: {e}')  
+            logging.error(f"Failed to connect to database: {e}")
+            QMessageBox.critical(self, 'Error', f'Failed to connect to database: {e}')
+
                 
-             # Create the audit_trail table if it doesn't exist
+    # Create the audit_trail table if it doesn't exist
     
 
     def closeEvent(self, event):
@@ -283,7 +291,7 @@ class MainWindow(QMainWindow):
                 self.log_audit_trail(action = "Changes Saved")
 
                 self.conn.commit()
-                
+                self.unsaved_changes = False
             except Exception as e:
                 print(f"An error occurred: {e}")
         else:
@@ -301,7 +309,7 @@ class MainWindow(QMainWindow):
     def handle_spin_change(self):
         # Placeholder method to handle spin button changes
         self.log_audit_trail(action = f'Theshold set to : {self.spin_button_1.value()} at image {self.current_image_index}')
-
+        
     def update_display(self):
         
         if self.checkbox_option1.isChecked() and self.checkbox_option2.isChecked():
@@ -412,60 +420,36 @@ class MainWindow(QMainWindow):
         self.login_dialog = LoginDialog(self)
         if self.login_dialog.exec_() == QDialog.Accepted:
             # Set the current user
-            self.current_user = self.login_dialog.current_user
-
+            self.signature = self.login_dialog.info 
+            self.current_user = self.login_dialog.current_user            
             self.new_study_action.setDisabled(False)
             self.load_study_action.setDisabled(False)
-
-            QMessageBox.information(self, "Login", "Login Successful.")
-            
-    def open_sign_dialog(self):
-        # Open the login dialog
-        self.sign_dialog = LoginDialog(self)
-        if self.sign_dialog.exec_() == QDialog.Accepted:
-            conn = sqlite3.connect('user_credentials.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT public_key FROM users WHERE username = ?", (self.current_user,))
-            result = cursor.fetchone()
-            conn.close()
-
-            if result:
-                public_key_pem = result[0]
-                public_key = serialization.load_pem_public_key(
-                    public_key_pem,
-                    backend=default_backend()
-                )
-
-                # Generate a digital signature (simulated here)
-                message = f"User {self.current_user} performed a sign action. {datetime.now()}"
-                signature = sha256(message.encode()).hexdigest()
-
-                # Log the signature in the audit trail
-                self.log_audit_trail(action = f'Signed by {self.current_user}', signature=signature)
-                QMessageBox.information(self, "Signature", "Digital signature created and logged.")
-            else:
-                QMessageBox.warning(self, "Error", "Public key not found for the current user.")
-        else:
-            QMessageBox.warning(self, "Error", "No user is currently logged in.")
-            
-    def select_image_folder(self):
-       # Open a file dialog to select a folder containing images
-        folder_path = QFileDialog.getExistingDirectory(self, "Select Image Folder", "")
-        if folder_path:
-            self.selected_image_folder = folder_path
-            self.image_files = [path.join(folder_path, f) for f in listdir(folder_path)
-                                if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
-            self.image_files.sort()  # Sort files alphabetically
+            self.log_audit_trail(action=self.login_dialog.action, signature = self.signature)
+                
+    def select_image_files(self):
+        # Open a file dialog to select multiple image files
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, 
+            "Select Image Files", 
+            "", 
+            "Images (*.png *.jpg *.jpeg *.tiff *.tif);;All Files (*)"
+        )
+        
+        if file_paths:
+            self.image_files = file_paths  # Store the selected file paths
+            self.image_files.sort()  # Sort files alphabetically (optional)
             self.processed_images = {}
             self.segment = 0
+    
             if self.image_files:
                 self.image_spinbox.setMaximum(len(self.image_files) - 1)
                 self.current_image_index = 0
                 self.display_image(self.current_image_index)
-                self.log_audit_trail(action = f'Images load from {folder_path}')
+                self.log_audit_trail(action=f'Images loaded from selected files: {file_paths}')
             else:
-                QMessageBox.warning(self, "Error", "No images found in the selected folder.")
-
+                QMessageBox.warning(self, "Error", "No images selected.")
+        else:
+            QMessageBox.warning(self, "Error", "No files were selected.")
 
     def select_study_file(self):
         # Open a file dialog and get the selected file path
@@ -490,12 +474,11 @@ class MainWindow(QMainWindow):
                 # Load nested dictionary back from HDF5 file
                 with h5py.File(file_path.replace('avzo', 'avzodata'), 'r') as h5f:
                     self.processed_images = load_dict_from_hdf5(h5f)
-
-                self.log_audit_trail(action = f'{file_path} loaded')
+                    
+                self.image_spinbox.setMaximum(len(self.processed_images) - 1)
+                
                 self.display_image(index = 0)
-                
-                
-
+                self.log_audit_trail(action = f'{file_path} loaded', signature = self.signature)
                 QMessageBox.information(self, "Load Study", "Study Loaded Sucessfully.")
 
             except Exception as e:
@@ -514,72 +497,76 @@ class MainWindow(QMainWindow):
             self.save_changes()
     
     def display_image(self, index):
+        self.current_image_index = index
+        if hasattr(self, 'processed_images'):
 
-            self.current_image_index = index            
-            
             if not self.current_image_index in self.processed_images.keys():
+                # Read and process the image
                 image_path = self.image_files[index]
-                # Display the processed image using matplotlib
-                # Display the original image using matplotlib
                 orig = imread(image_path)
-                orig = ((orig-orig.min())/orig.max())*255
-                self.processed_images[self.current_image_index] = {i: orig.astype(np.uint8) for i in range(4)}  
-
+                orig = ((orig - orig.min()) / orig.max()) * 255
+                self.processed_images[self.current_image_index] = {i: orig.astype(np.uint8) for i in range(4)}
+    
+            # Update the display
             self.figure.clear()
             ax = self.figure.add_subplot(111)
             ax.imshow(self.processed_images[self.current_image_index][self.segment], cmap='gray')
             ax.axis('off')
             self.load_results_table()
-            self.canvas.draw()  
+            self.canvas.draw()
+        else:
+            QMessageBox.warning(self, "Error", "No images available to display.")
 
-        
     def run_avizo_recipe(self):
         if hasattr(self, 'processed_images'):
-            index = self.current_image_index
-            processed = self.processed_images[self.current_image_index]
-            # Perform thresholding on the current image and store the result
-            threshold_value = (self.spin_button_1.value() /100) * processed[0].max()
-            binary_image = processed[0] > threshold_value
-
-            # Label connected components
-            labeled_image =  label(binary_image)
-
-            regions = regionprops(labeled_image)
-
-            cursor = self.conn.cursor()
-            # Extracting common measurements
-            cursor.execute('''
-                DELETE FROM results WHERE image = (?)''', (str(index),))
-            
-            for region in regions:
-                cursor.execute('''
-                INSERT INTO results (image, area, perimeter, x, y, eccentricity, major_axis_length, minor_axis_length) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (str(index), region.area, region.perimeter, region.centroid[0], region.centroid[1], region.eccentricity, region.major_axis_length, region.minor_axis_length))
-
-
-            colored_image = label2rgb(labeled_image)
-            self.processed_images[self.current_image_index][3] = label2rgb(labeled_image)
-            large_objects = remove_small_objects(labeled_image, min_size=100)
-            self.processed_images[self.current_image_index][1] = label2rgb(large_objects)
-            small = labeled_image ^ large_objects
-            self.processed_images[self.current_image_index][2] = label2rgb(small)
-            self.display_image(self.current_image_index)
-            self.segment = 3
-            
-            self.display_image(self.current_image_index)
-            self.checkbox_option1.setChecked(True)
-            self.checkbox_option2.setChecked(True)
-
-            self.log_audit_trail(action = f"Analyzed image {self.current_image_index}. Threshold: {self.spin_button_1}%.")
-            QMessageBox.information(self, "Success", "Thresholding and labeling performed successfully.")     
-            
+            try:
+                index = self.current_image_index
+                processed = self.processed_images[self.current_image_index]
+                threshold_value = (self.spin_button_1.value() / 100) * processed[0].max()
+                binary_image = processed[0] > threshold_value
+                labeled_image = label(binary_image)
+                regions = regionprops(labeled_image)
+    
+                cursor = self.conn.cursor()
+                cursor.execute('DELETE FROM results WHERE image = ?', (str(index),))
+    
+                for region in regions:
+                    cursor.execute('''
+                        INSERT INTO results (image, area, perimeter, x, y, eccentricity, major_axis_length, minor_axis_length)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (str(index), region.area, region.perimeter, region.centroid[0], region.centroid[1],
+                          region.eccentricity, region.major_axis_length, region.minor_axis_length))
+    
+                self.conn.commit()
+    
+                colored_image = label2rgb(labeled_image)
+                self.processed_images[self.current_image_index][3] = label2rgb(labeled_image)
+                large_objects = remove_small_objects(labeled_image, min_size=100)
+                self.processed_images[self.current_image_index][1] = label2rgb(large_objects)
+                small = labeled_image ^ large_objects
+                self.processed_images[self.current_image_index][2] = label2rgb(small)
+    
+                self.display_image(self.current_image_index)
+                self.segment = 3
+                self.display_image(self.current_image_index)
+                self.checkbox_option1.setChecked(True)
+                self.checkbox_option2.setChecked(True)
+    
+                self.log_audit_trail(action=f"Analyzed image {self.current_image_index}. Threshold: {self.spin_button_1}%.")
+                QMessageBox.information(self, "Success", "Thresholding and labeling performed successfully.")
+                self.unsaved_changes = True
+                logging.info(f"Image {index} analyzed successfully.")
+            except Exception as e:
+                logging.error(f"Error during image processing: {e}")
+                QMessageBox.warning(self, "Error", f"An error occurred during image processing: {e}")
         else:
             QMessageBox.warning(self, "Error", "No image loaded or image path is invalid.")
 
 
+
     def log_audit_trail(self, action, signature = ""):
 
-        if self.conn:
+        if hasattr(self, 'conn'):
         # Connect to the SQLite database
             cursor = self.conn.cursor()
     
@@ -592,12 +579,18 @@ class MainWindow(QMainWindow):
             ''', (self.current_user, date, time, action, signature))
             self.load_audit_trail_data()
 
-
     def register_action(self):
-        self.registerDialog = registerDialog(self)
-        if self.registerDialog.exec_() == QDialog.Accepted:
-            self.current_user = self.registerDialog.current_user
-            QMessageBox.information(self, "Registration", "Registration Successful.")
+        # Instantiate the registration dialog using the registerDialog class
+        self.RegisterDialog = RegisterDialog(self)
+        
+        # Execute the dialog and check if the user clicked "Register" and was successful
+        if self.RegisterDialog.exec_() == QDialog.Accepted:
+            # Set the current user based on the username input from the registration dialog
+            self.current_user = self.RegisterDialog.username_input.text().strip()
+            logging.info(f'User registered successfully: {self.current_user}')
+        else:
+            logging.warning('Registration was not completed.')
+    
 
 class FileDialog(QWidget):
     def __init__(self):
