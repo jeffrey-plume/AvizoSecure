@@ -3,7 +3,6 @@ from PyQt5.QtWidgets import (
     QDialog, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QPushButton, QComboBox
 )
 import sqlite3
-import logging
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
@@ -12,7 +11,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives import padding as sym_padding
 from base64 import b64decode, b64encode
 import secrets
-import logging
+
 
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
@@ -31,7 +30,7 @@ class LoginDialog(QDialog):
         # Reason dropdown
         self.reason_label = QLabel("Reason:", self)
         self.reason_dropdown = QComboBox(self)
-        self.reason_dropdown.addItems(["File Created", "File Completed", "File Reviewed"])
+        self.reason_dropdown.addItems(["User Login", "File Created", "File Completed", "File Reviewed"])
 
         # Login button
         self.login_button = QPushButton("Sign", self)
@@ -47,9 +46,6 @@ class LoginDialog(QDialog):
         layout.addWidget(self.reason_dropdown)
         layout.addWidget(self.login_button)
         self.setLayout(layout)
-
-        # Set up logging for audit trail
-        logging.basicConfig(filename='audit.log', level=logging.INFO, format='%(asctime)s - %(message)s')
 
         # Limit login attempts
         self.login_attempts = 0
@@ -79,7 +75,7 @@ class LoginDialog(QDialog):
             self.current_user = username
             self.action = self.reason_dropdown.currentText()
             data_to_sign = f'Signed by {username} \n{datetime.now():%Y-%m-%d %H:%M:%S} \nReason: {self.action}'
-            logging.info(data_to_sign)
+
 
             # Retrieve and decrypt the user's private key
             private_key = self.retrieve_and_decrypt_private_key(username, salt)
@@ -90,7 +86,6 @@ class LoginDialog(QDialog):
 
                 if signature:
                     QMessageBox.information(self, "Digital Signature", f'{data_to_sign} \n{signature.hex()}')
-                    logging.info(f'{signature.hex()}')
                     self.info = signature.hex()
                     self.accept()
                 else:
@@ -98,7 +93,7 @@ class LoginDialog(QDialog):
             else:
                 QMessageBox.warning(self, "Error", "Failed to retrieve or decrypt private key.")
         else:
-            logging.warning(f'Failed login attempt for username: {username}')
+
             QMessageBox.warning(self, "Error", "Invalid username or password")
             self.password_input.clear()  # Clear the password field after a failed attempt
 
@@ -131,7 +126,7 @@ class LoginDialog(QDialog):
             else:
                 return None
         except sqlite3.Error as e:
-            logging.error(f'Database error while retrieving salt: {e}')
+
             QMessageBox.critical(self, "Database Error", "An error occurred while accessing the database.")
             return None
 
@@ -150,7 +145,7 @@ class LoginDialog(QDialog):
             conn.close()
             return result is not None  # If a matching record is found, return True
         except sqlite3.Error as e:
-            logging.error(f'Database error: {e}')
+
             QMessageBox.critical(self, "Database Error", "An error occurred while accessing the database.")
             return False
 
@@ -170,7 +165,7 @@ class LoginDialog(QDialog):
             else:
                 return None
         except sqlite3.Error as e:
-            logging.error(f'Database error while retrieving private key: {e}')
+
             QMessageBox.critical(self, "Database Error", "An error occurred while accessing the database.")
             return None
 
@@ -205,7 +200,6 @@ class LoginDialog(QDialog):
                 backend=default_backend()
             )
         except Exception as e:
-            logging.error(f'Error during private key decryption: {e}')
             return None
 
     def sign_data(self, private_key, data):
@@ -220,7 +214,7 @@ class LoginDialog(QDialog):
             )
             return signature
         except Exception as e:
-            logging.error(f'Error during data signing: {e}')
+
             return None
 
     def read_master_key(self, file_path):

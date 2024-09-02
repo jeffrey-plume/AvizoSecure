@@ -9,24 +9,16 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-import numpy as np
 from skimage.io import imread
 from skimage.color import label2rgb
 from skimage.measure import label,regionprops
 from skimage.morphology import remove_small_objects
-from cryptography.hazmat.primitives import serialization, hashes
+
 from LoginDialog import LoginDialog
 from RegisterDialog import RegisterDialog
-import h5py
-from hashlib import sha256 
-import logging
-from UserAuthDialog import userAuthDialog
-import csv
+from h5py import File, Group
+from csv import writer
 
-# Set up basic configuration for logging
-logging.basicConfig(level=logging.INFO, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -228,13 +220,13 @@ class MainWindow(QMainWindow):
     
                 # Write results to CSV
                 with open(file_path, 'w', newline='') as csvfile:
-                    csv_writer = csv.writer(csvfile)
+                    csv_writer = writer(csvfile)
                     csv_writer.writerow(["ID", "Image", "Area", "Perimeter", "X", "Y", "Eccentricity", "Major Axis Length", "Minor Axis Length"])
                     csv_writer.writerows(results)
     
                 QMessageBox.information(self, "Export Successful", f"Results exported to {file_path}")
         except Exception as e:
-            logging.error(f"Error exporting results to CSV: {e}")
+
             QMessageBox.critical(self, "Export Error", f"An error occurred while exporting results to CSV: {e}")
     
     def export_audit_trail_to_csv(self):
@@ -250,7 +242,7 @@ class MainWindow(QMainWindow):
     
                 # Write audit trail to CSV
                 with open(file_path, 'w', newline='') as csvfile:
-                    csv_writer = csv.writer(csvfile)
+                    csv_writer = writer(csvfile)
                     csv_writer.writerow(["ID", "Username", "Date", "Time", "Action", "Signature"])
                     csv_writer.writerows(audit_trail)
     
@@ -301,10 +293,10 @@ class MainWindow(QMainWindow):
                 self.export_audit_action.setDisabled(False)
                 self.load_results_table()
                 self.log_audit_trail(action = "Connection Created")
-                logging.info(f"Connected to database: {file_path}")
+
                 
         except sqlite3.Error as e:
-            logging.error(f"Failed to connect to database: {e}")
+
             QMessageBox.critical(self, 'Error', f'Failed to connect to database: {e}')
 
                 
@@ -346,7 +338,7 @@ class MainWindow(QMainWindow):
                         h5_group.create_dataset(str(key), data=value)
             try:
                 # Save nested dictionary to HDF5 file
-                with h5py.File(self.file_path.replace("avzo","avzodata"), 'w') as h5f:
+                with File(self.file_path.replace("avzo","avzodata"), 'w') as h5f:
                     save_dict_to_hdf5(self.processed_images, h5f)
 
                 
@@ -528,20 +520,22 @@ class MainWindow(QMainWindow):
                 def load_dict_from_hdf5(h5_group):
                     data_dict = {}
                     for key, item in h5_group.items():
-                        if isinstance(item, h5py.Group):
+                        if isinstance(item, Group):
                             data_dict[int(key)] = load_dict_from_hdf5(item)
                         else:
                             data_dict[int(key)] = item[()]
                     return data_dict
             
                 # Load nested dictionary back from HDF5 file
-                with h5py.File(file_path.replace('avzo', 'avzodata'), 'r') as h5f:
+                with File(file_path.replace('avzo', 'avzodata'), 'r') as h5f:
                     self.processed_images = load_dict_from_hdf5(h5f)
                     
                 self.image_spinbox.setMaximum(len(self.processed_images) - 1)
                 
                 self.display_image(index = 0)
                 self.log_audit_trail(action = f'{file_path} loaded', signature = self.signature)
+                self.checkbox_option1.setChecked(False)
+                self.checkbox_option2.setChecked(False)
                 QMessageBox.information(self, "Load Study", "Study Loaded Sucessfully.")
 
             except Exception as e:
@@ -568,7 +562,7 @@ class MainWindow(QMainWindow):
                 image_path = self.image_files[index]
                 orig = imread(image_path)
                 orig = ((orig - orig.min()) / orig.max()) * 255
-                self.processed_images[self.current_image_index] = {i: orig.astype(np.uint8) for i in range(4)}
+                self.processed_images[self.current_image_index] = {i: orig for i in range(4)}
     
             # Update the display
             self.figure.clear()
@@ -589,7 +583,7 @@ class MainWindow(QMainWindow):
                 binary_image = processed[0] > threshold_value
                 labeled_image = label(binary_image)
                 regions = regionprops(labeled_image)
-    
+      
                 cursor = self.conn.cursor()
                 cursor.execute('DELETE FROM results WHERE image = ?', (str(index),))
     
@@ -597,8 +591,14 @@ class MainWindow(QMainWindow):
                     cursor.execute('''
                         INSERT INTO results (image, area, perimeter, x, y, eccentricity, major_axis_length, minor_axis_length)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (str(index), region.area, region.perimeter, region.centroid[0], region.centroid[1],
-                          region.eccentricity, region.major_axis_length, region.minor_axis_length))
+                    ''', (str(index), 
+                          f'{region.area:.2f}', 
+                          f'{region.perimeter:.2f}',
+                          f'{region.centroid[0]:.2f}',
+                          f'{region.centroid[1]:.2f}',
+                          f'{region.eccentricity:.2f}', 
+                          f'{region.major_axis_length:.2f}', 
+                          f'{region.minor_axis_length:.2f}'))
     
                 self.conn.commit()
     
@@ -618,9 +618,9 @@ class MainWindow(QMainWindow):
                 self.log_audit_trail(action=f"Analyzed image {self.current_image_index}. Threshold: {self.spin_button_1}%.")
                 QMessageBox.information(self, "Success", "Thresholding and labeling performed successfully.")
                 self.unsaved_changes = True
-                logging.info(f"Image {index} analyzed successfully.")
+  
             except Exception as e:
-                logging.error(f"Error during image processing: {e}")
+
                 QMessageBox.warning(self, "Error", f"An error occurred during image processing: {e}")
         else:
             QMessageBox.warning(self, "Error", "No image loaded or image path is invalid.")
@@ -650,9 +650,9 @@ class MainWindow(QMainWindow):
         if self.RegisterDialog.exec_() == QDialog.Accepted:
             # Set the current user based on the username input from the registration dialog
             self.current_user = self.RegisterDialog.username_input.text().strip()
-            logging.info(f'User registered successfully: {self.current_user}')
+            info(f'User registered successfully: {self.current_user}')
         else:
-            logging.warning('Registration was not completed.')
+            warning('Registration was not completed.')
     
 
 class FileDialog(QWidget):
