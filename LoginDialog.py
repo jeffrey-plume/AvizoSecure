@@ -31,7 +31,7 @@ class LoginDialog(QDialog):
         # Reason dropdown
         self.reason_label = QLabel("Reason:", self)
         self.reason_dropdown = QComboBox(self)
-        self.reason_dropdown.addItems(["User Login", "File Created", "File Loaded", "New User Created", "Study Completed", "Data Reviewed"])
+        self.reason_dropdown.addItems(["File Created", "File Completed", "File Reviewed"])
 
         # Login button
         self.login_button = QPushButton("Sign", self)
